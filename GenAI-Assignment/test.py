@@ -49,14 +49,27 @@ IMG_PATH = Path(__file__).parent / "Chart.png"
 # OpenAI client (for AI overview in Part 1)
 # =========================
 OPENAI_READY = False
+_client = None
+
 try:
-    from openai import OpenAI  # pip install openai
-    from API_KEY import OPENAI_API_KEY  # from file: API_KEY.py
-    _client = OpenAI(api_key=OPENAI_API_KEY)
+    from openai import OpenAI  # pip install "openai>=1.2.0"
+
+    # Get the API key from Streamlit secrets (on Streamlit Cloud)
+    api_key = st.secrets.get("OPENAI_API_KEY", "")
+
+    if not api_key:
+        raise ValueError(
+            "No OPENAI_API_KEY found in Streamlit secrets. "
+            "Add it in the app's Advanced settings → Secrets."
+        )
+
+    _client = OpenAI(api_key=api_key)
     OPENAI_READY = True
+
 except Exception as e:
     st.warning(f"⚠️ OpenAI not initialized: {e}")
     OPENAI_READY = False
+
 
 # =========================
 # Sidebar to use ChatGPT
@@ -340,3 +353,4 @@ if uploaded is not None:
 
     except Exception as e:
         st.error(f"❌ Could not read the file: {e}")
+
