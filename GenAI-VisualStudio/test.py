@@ -19,9 +19,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # ============ LiteLLM / OpenAI proxy ============
-#OPENAI_API_KEY = "ENTER YOUR API-KEY HERE"
+##OPENAI_API_KEY="ENTER YOUR API-KEY HERE"
 
-#os.environ["OPENAI_API_KEY"]  = OPENAI_API_KEY
+##os.environ["OPENAI_API_KEY"]=OPENAI_API_KEY
 
 # Streamlit Cloud injects OPENAI_API_KEY automatically
 if not os.getenv("OPENAI_API_KEY"):
@@ -473,6 +473,7 @@ if uploaded:
 
     except Exception as e:
         st.error(f"❌ Error: {e}")
+
 
 
 
