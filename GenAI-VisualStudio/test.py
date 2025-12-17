@@ -19,7 +19,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # ============ LiteLLM / OpenAI proxy ============
-
+OPENAI_API_KEY = "ENTER YOUR API-KEY HERE"
 
 os.environ["OPENAI_API_KEY"]  = OPENAI_API_KEY
 
@@ -469,4 +469,5 @@ if uploaded:
 
     except Exception as e:
         st.error(f"❌ Error: {e}")
+
 
