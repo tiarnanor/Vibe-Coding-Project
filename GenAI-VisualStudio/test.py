@@ -1,342 +1,472 @@
-# marketing insights generator
-#make sure to run this in terminal: pip install streamlit pandas numpy openai plotly pyarrow
-# run pip install "openai>=1.2.0" --upgrade
+# helios_lida_frontend.py
+from __future__ import annotations
 
-from pathlib import Path
+import io
+import os
 import json
+import base64
+import tempfile
+from pathlib import Path
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 import streamlit as st
 
-# (Optional) Plotly is here if/when you swap back to live charts
-import plotly.express as px  # noqa: F401
+# Use headless backend for server-side image saving
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
-# =========================
-# Page / Branding
-# =========================
-st.set_page_config(page_title="Helios AI", page_icon="📤", layout="wide")
+# ============ LiteLLM / OpenAI proxy ============
+OPENAI_API_KEY = "ENTER YOUR API-KEY HERE"
 
+
+os.environ["OPENAI_API_KEY"]  = OPENAI_API_KEY
+
+
+from openai import OpenAI
+from llmx import llm
+from lida import Manager, TextGenerationConfig
+
+oa_client = OpenAI()
+DEFAULT_MODEL = "gpt-4o"
+
+# LIDA with llmx-backed OpenAI 
+text_gen = llm(provider="openai", model=DEFAULT_MODEL)
+lida     = Manager(text_gen=text_gen)
+
+# ================= Page / styles =================
+st.set_page_config(page_title="Helios AI (LIDA)", page_icon="📈", layout="wide")
 st.markdown("""
 <style>
-    .stApp { background: #f5f7fb; color: #1b1f23; }
-    h1 { text-align: center; color: #0078ff; font-weight: 800; font-size: 2.4rem; }
-    .subhead { text-align: center; color: #5b6b7d; font-size: 1.1rem; margin-top: -10px; margin-bottom: 24px; }
-
-    [data-testid="stFileUploader"] section { padding: 0 !important; border: none !important; background: transparent !important; }
-    [data-testid="stFileUploaderDropzone"] {
-        border: 3px dashed #0078ff !important; border-radius: 16px !important; background: #ffffff !important;
-        padding: 60px !important; box-shadow: 0 4px 20px rgba(0, 120, 255, 0.1); transition: all 0.3s ease;
-    }
-    [data-testid="stFileUploaderDropzone"]:hover {
-        border-color: #00aaff !important; background: #f0faff !important; box-shadow: 0 6px 25px rgba(0, 120, 255, 0.2);
-    }
-    [data-testid="stFileUploaderDropzone"] div { text-align: center !important; color: #2d3e50; font-weight: 600; }
-    [data-testid="stFileUploaderDropzone"] svg { display: block; margin: 0 auto 12px auto; width: 64px; height: 64px; color: #0078ff; }
-    .upload-sub { color:#6c7b8a; margin-top: 6px; text-align:center; font-size: 0.95rem; }
-
-    /* Compact buttons */
-    .small-btn .stButton>button { padding: 0.3rem 0.6rem; font-size: 0.9rem; }
+  .stApp { background:#f5f7fb; color:#1b1f23; }
+  h1 { text-align:center; color:#0078ff; font-weight:800; font-size:2.4rem; }
+  .subhead { text-align:center; color:#5b6b7d; font-size:1.1rem; margin-top:-10px; margin-bottom:24px; }
+  .boxed { background:#fff; border:1px solid #e6ebf2; border-radius:14px; padding:16px; }
 </style>
 """, unsafe_allow_html=True)
+st.markdown("<h1>Helios AI (LIDA Integration)</h1>", unsafe_allow_html=True)
+st.markdown("<p class='subhead'>Upload → Summarize → Goals → Visualize → Explain → Evaluate → Repair</p>", unsafe_allow_html=True)
 
-st.markdown("<h1>Helios AI</h1>", unsafe_allow_html=True)
-st.markdown("<p class='subhead'>Part 1: Upload data & AI overview · Part 2: (Testing) render the static chart image</p>", unsafe_allow_html=True)
-
-# Static test image (always shown for Part 2 in this build)
-IMG_PATH = Path(__file__).parent / "Chart.png"
-
-# =========================
-# OpenAI client (for AI overview in Part 1)
-# =========================
-OPENAI_READY = False
-try:
-    from openai import OpenAI  # pip install openai
-    from API_KEY import OPENAI_API_KEY  # from file: API_KEY.py
-    _client = OpenAI(api_key=OPENAI_API_KEY)
-    OPENAI_READY = True
-except Exception as e:
-    st.warning(f"⚠️ OpenAI not initialized: {e}")
-    OPENAI_READY = False
-
-# =========================
-# Sidebar to use ChatGPT
-# =========================
+# ================= Sidebar =================
 with st.sidebar:
-    st.subheader("Options")
-    use_llm_overview = st.toggle("Use ChatGPT for overview (Part 1)", value=True if OPENAI_READY else False)
-    model_name = st.text_input("Model", "gpt-4o-mini")
-    st.caption("Part 2 (chart) is in testing mode and always shows Chart.png.")
+    st.subheader("Visualization engine")
+    LIBRARY     = st.selectbox("Chart library", ["matplotlib", "seaborn"], index=0)
+    TEXT_TEMP   = st.slider("LLM Temperature (text/goals)", 0.0, 1.0, 0.2, 0.05)
+    VIZ_TEMP    = st.slider("LLM Temperature (visualize)", 0.0, 1.0, 0.2, 0.05)
+    REC_TEMP    = st.slider("LLM Temperature (recommend)", 0.0, 1.0, 0.2, 0.05)
+    REC_COUNT   = st.slider("Number of recommendations", 1, 5, 3)
 
-# =========================
-# Session state for the two parts + upload + evaluation
-# =========================
-st.session_state.setdefault("data_file", None)
-st.session_state.setdefault("overview_text", None)
-st.session_state.setdefault("viz_image_path", None)
-st.session_state.setdefault("viz_code", None)
-st.session_state.setdefault("viz_expl", None)
-st.session_state.setdefault("eval_scores", None)
-st.session_state.setdefault("eval_overall", None)
-
-def clear_part1():
-    st.session_state["overview_text"] = None
-
-def clear_part2():
-    st.session_state["viz_image_path"] = None
-    st.session_state["viz_code"] = None
-    st.session_state["viz_expl"] = None
-    st.session_state["eval_scores"] = None
-    st.session_state["eval_overall"] = None
-
-# =========================
-# Upload
-# =========================
-st.markdown("### Upload your data")
-uploaded = st.file_uploader(
-    "Drop your data file here",
-    type=["csv", "tsv", "xlsx", "xlsm", "xls", "json", "parquet"],
-    accept_multiple_files=False
-)
-st.markdown("<p class='upload-sub'>or click to browse</p>", unsafe_allow_html=True)
-
-# =========================
-# Helpers
-# =========================
+# ================= Helpers =================
 def read_any(file) -> pd.DataFrame:
     name = file.name.lower()
-    if name.endswith(".csv") or name.endswith(".tsv"):
-        sep = "\t" if name.endswith(".tsv") else ","
-        return pd.read_csv(file, sep=sep)
-    if name.endswith((".xlsx", ".xlsm", ".xls")):
+    if name.endswith(".csv"):
+        return pd.read_csv(file)
+    if name.endswith(".xlsx"):
+        try:
+            import openpyxl  # noqa: F401
+        except Exception:
+            st.error("Missing dependency 'openpyxl' for .xlsx. Install: pip install openpyxl")
+            raise
         return pd.read_excel(file)
     if name.endswith(".json"):
         return pd.read_json(file)
-    if name.endswith(".parquet"):
-        return pd.read_parquet(file)
-    file.seek(0)
-    return pd.read_csv(file)
+    raise ValueError("Unsupported file format. Use .csv, .xlsx, .json")
 
-def detect_types(df: pd.DataFrame):
-    nums = df.select_dtypes(include=[np.number]).columns.tolist()
-    dts  = df.select_dtypes(include=["datetime", "datetimetz"]).columns.tolist()
-    if not dts:
-        for c in df.columns:
-            if df[c].dtype == object:
-                try:
-                    parsed = pd.to_datetime(df[c], errors="raise")
-                    if (~pd.isna(parsed)).mean() >= 0.7:
-                        dts.append(c)
-                except Exception:
-                    pass
-    cats = [c for c in df.columns if c not in nums + dts]
-    return nums, dts, cats
+def label_goal(g) -> str:
+    if isinstance(g, str):
+        return g
+    if isinstance(g, dict) and "question" in g:
+        return g["question"]
+    return getattr(g, "question", str(g))
 
-def recommended_prompts(df: pd.DataFrame):
-    nums, dts, cats = detect_types(df)
-    recs = []
-    if nums: recs.append(f"Show distribution of {nums[0]}")
-    if dts and nums: recs.append(f"Trend of {nums[0]} over time by {dts[0]}")
-    if cats and nums: recs.append(f"Compare {nums[0]} by {cats[0]}")
-    if len(nums) >= 2: recs.append(f"Relationship between {nums[0]} and {nums[1]}")
-    for g in ["Top categories by count", "Monthly trend of main metric", "Outliers in numerics", "Compare two numeric fields"]:
-        if len(recs) >= 4: break
-        if g not in recs: recs.append(g)
-    return recs[:4]
+def _looks_png(b: bytes) -> bool:  return len(b) > 8 and b[:8] == b"\x89PNG\r\n\x1a\n"
+def _looks_jpeg(b: bytes) -> bool: return len(b) > 3 and b[:3] == b"\xFF\xD8\xFF"
+def _looks_svg(b: bytes) -> bool:  return b"<svg" in b[:256].lower()
 
-def schema_payload(df: pd.DataFrame, max_cols=30, max_rows=8):
-    schema = [{"name": c, "dtype": str(df[c].dtype)} for c in df.columns[:max_cols]]
-    sample = df.head(max_rows).to_dict(orient="records")
-    return {"schema": schema, "sample": sample}
+def _write_temp(ext: str, data: bytes) -> str:
+    f = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+    f.write(data); f.close()
+    return f.name
 
-def ai_overview(df: pd.DataFrame, model: str) -> str:
-    if not OPENAI_READY:
-        raise RuntimeError("OpenAI key not configured.")
+def _embed_svg(svg_bytes: bytes):
+    b64 = base64.b64encode(svg_bytes).decode("ascii")
+    st.markdown(f"<img src='data:image/svg+xml;base64,{b64}' style='max-width:100%;'/>", unsafe_allow_html=True)
+
+def run_code_to_png(code: str, df: pd.DataFrame) -> Optional[str]:
+    try:
+        import seaborn as sns  # noqa: F401
+    except Exception:
+        sns = None
+    ns = {"pd": pd, "np": np, "plt": plt, "data": df, "df": df, "dataset": df, "sns": sns}
+    out = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+    out_path = out.name; out.close()
+    try:
+        exec(code, ns, ns)
+        fig = plt.gcf()
+        if fig: fig.savefig(out_path, bbox_inches="tight", dpi=150)
+        plt.close("all")
+        return out_path if Path(out_path).exists() else None
+    except Exception as e:
+        plt.close("all")
+        st.error(f"Failed to execute chart code: {e}")
+        return None
+
+def extract_artifact_and_code(obj):
+    if obj is None: return None, None
+    if isinstance(obj, dict):
+        art  = obj.get("path") or obj.get("image") or obj.get("artifact") or obj.get("img_bytes")
+        code = obj.get("code")
+        return art, code
+    art  = getattr(obj, "path", None) or getattr(obj, "image", None) or getattr(obj, "artifact", None) or getattr(obj, "img_bytes", None)
+    code = getattr(obj, "code", None)
+    return art, code
+
+def show_chart_artifact(chart_obj, code: Optional[str], df: pd.DataFrame) -> Optional[str]:
+    artifact, code_from_obj = extract_artifact_and_code(chart_obj)
+    code = code or code_from_obj
+
+    # path-like
+    if isinstance(artifact, (str, Path)):
+        apath = str(artifact)
+        if apath.lower().endswith(".svg"):
+            with open(apath, "rb") as f: _embed_svg(f.read())
+            return None
+        st.image(apath, use_container_width=True)
+        return apath
+
+    # bytes-like
+    if isinstance(artifact, (bytes, bytearray, io.BytesIO)):
+        b = artifact if isinstance(artifact, (bytes, bytearray)) else artifact.getvalue()
+        if _looks_png(b) or _looks_jpeg(b):
+            ext = ".png" if _looks_png(b) else ".jpg"
+            path = _write_temp(ext, b); st.image(path, use_container_width=True); return path
+        if _looks_svg(b):
+            _embed_svg(b); return None
+        if code:
+            path = run_code_to_png(code, df)
+            if path: st.image(path, use_container_width=True); return path
+        st.warning("Got non-image bytes and no usable code to render."); return None
+
+    # no artifact → try code
+    if code:
+        path = run_code_to_png(code, df)
+        if path: st.image(path, use_container_width=True); return path
+
+    st.warning("No image path returned (but code may be available).")
+    if code: st.code(code, language="python")
+    return None
+
+# ---------- OpenAI helpers for marketing rewrites ----------
+def marketing_from_explanation(expl_obj: object) -> str:
+    payload = json.dumps(expl_obj, default=str)
+    key = "expl_" + payload[:2000]
+    cache = st.session_state.get("mk_cache")
+    if cache and cache.get("key") == key:
+        return cache["text"]
     system = (
-        "You are a senior marketing analyst. Based on the dataset schema and sample rows, "
-    "provide a concise insight summary (5–8 bullet points max) written for a marketing team. "
-    "Focus on what matters to marketers: customers, segments, performance trends, outliers, "
-    "growth opportunities, campaign relevance, and data quality caveats. "
-    "Avoid technical jargon, avoid guessing, and do not invent insights that are not visible in the sample. "
-    "Write in a confident, insight-driven business tone — not a data science tone."
+        "You are a senior marketing analyst. Rewrite the provided chart explanation "
+        "into a concise, non-technical summary (5–8 bullet points) focused on "
+        "trends, drivers, segments, outliers, and actionable takeaways."
     )
-    user = json.dumps(schema_payload(df))
-    resp = _client.responses.create(
-        model=model,
-        input=[{"role": "system", "content": system},
-               {"role": "user", "content": user}]
+    resp = oa_client.chat.completions.create(
+        model=DEFAULT_MODEL,
+        messages=[{"role":"system","content":system},
+                  {"role":"user","content":payload}],
+        temperature=0.2,
     )
-    return resp.output_text.strip()
+    text = (resp.choices[0].message.content or "").strip()
+    st.session_state["mk_cache"] = {"key": key, "text": text}
+    return text
 
-def evaluate_visualisation() -> dict:
-    rubric = {
-        "Clarity & Readability": {"score": 4, "why": "Axes and layout are easy to read at a glance."},
-        "Relevance to Prompt": {"score": 4, "why": "The visual aligns with the stated question or comparison."},
-        "Accuracy & Integrity": {"score": 5, "why": "No mismatch between labels and data; scales look reasonable."},
-        "Labeling & Legends": {"score": 3, "why": "Labels/legend exist but could be more descriptive."},
-        "Visual Design Choices": {"score": 4, "why": "Chart type and ordering support comparison without clutter."},
-        "Actionability / Insight": {"score": 3, "why": "Findings are interpretable but key takeaways could be clearer."},
-    }
-    return rubric
+def marketing_from_summary(summary_obj: dict) -> str:
+    """
+    NEW: Rewrite the LIDA summary into a marketing-analyst overview (bullets),
+    with caching keyed by the JSON payload.
+    """
+    payload = json.dumps(summary_obj, default=str)
+    key = "sum_" + payload[:2000]
+    cache = st.session_state.get("mk_cache_summary")
+    if cache and cache.get("key") == key:
+        return cache["text"]
+    system = (
+        "You are a senior marketing analyst. Translate the dataset schema and field "
+        "properties into a concise overview (5–8 bullet points) for a marketing team. "
+        "Focus on what matters to marketers: customer/engagement metrics, time ranges, "
+        "segments/categories, notable ranges/outliers, and data quality caveats. "
+        "Avoid jargon and do not invent facts."
+    )
+    resp = oa_client.chat.completions.create(
+        model=DEFAULT_MODEL,
+        messages=[{"role":"system","content":system},
+                  {"role":"user","content":payload}],
+        temperature=0.2,
+    )
+    text = (resp.choices[0].message.content or "").strip()
+    st.session_state["mk_cache_summary"] = {"key": key, "text": text}
+    return text
 
-# =========================
-# Main Logic
-# =========================
-if uploaded is not None:
+# ================= Session =================
+st.session_state.setdefault("summary", None)
+st.session_state.setdefault("goals", [])
+st.session_state.setdefault("goal_obj", None)
+
+st.session_state.setdefault("chart_code", None)
+st.session_state.setdefault("chart_png", None)
+
+st.session_state.setdefault("explanation_obj", None)
+st.session_state.setdefault("explanation_view", "LIDA JSON")
+
+st.session_state.setdefault("eval_ready", False)
+st.session_state.setdefault("eval_df", None)
+
+st.session_state.setdefault("repair_text", "")
+st.session_state.setdefault("recommendations", None)
+
+# ================= Upload / flow =================
+st.markdown("### 📤 Upload your data")
+uploaded = st.file_uploader("Drop or browse a CSV, Excel, or JSON file", type=["csv", "xlsx", "json"])
+st.caption("Supports .csv, .xlsx, .json")
+
+if uploaded:
     try:
         df = read_any(uploaded)
         st.success("✅ File loaded successfully!")
 
-        rows, cols = df.shape
-        missing_total = int(df.isna().sum().sum())
-
-        # --- Summary ---
-        st.markdown("### Summary")
+        # Stats & preview
         c1, c2, c3 = st.columns(3)
-        c1.metric("Rows", f"{rows:,}")
-        c2.metric("Columns", f"{cols:,}")
-        c3.metric("Missing values", missing_total)
-
+        c1.metric("Rows", f"{len(df):,}")
+        c2.metric("Columns", f"{len(df.columns):,}")
+        c3.metric("Missing values", f"{int(df.isna().sum().sum()):,}")
         st.markdown("#### Preview (first 10 rows)")
         st.dataframe(df.head(10), use_container_width=True)
 
-        # --- AI Overview ---
-        hdr1 = st.columns([0.88, 0.12])
-        with hdr1[0]:
-            st.markdown("### AI Overview")
-        with hdr1[1]:
-            with st.container():
-                st.markdown('<div class="small-btn">', unsafe_allow_html=True)
-                if st.button("🔁 Redo Summary", key="clear_part1"):
-                    clear_part1()
-                    st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
+        # --------- Dataset Summary (with toggle) ---------
+        st.markdown("### 🧾 Dataset Summary (LIDA)")
+        with st.spinner("Summarizing dataset with LIDA…"):
+            tcfg_sum = TextGenerationConfig(n=1, temperature=TEXT_TEMP, model=DEFAULT_MODEL, use_cache=True)
+            summary = lida.summarize(df, summary_method="llm", textgen_config=tcfg_sum)
+            st.session_state["summary"] = summary
 
-        if use_llm_overview and OPENAI_READY and st.session_state["overview_text"] is None:
-            try:
-                with st.spinner("💬 Asking ChatGPT for a quick overview..."):
-                    st.session_state["overview_text"] = ai_overview(df, model_name)
-            except Exception as e:
-                st.error(f"⚠️ Could not generate AI overview: {e}")
-
-        if st.session_state["overview_text"]:
-            st.success("AI summary:")
-            st.markdown(st.session_state["overview_text"])
+        # Toggle lives directly under the header
+        sum_view = st.radio(
+            "Show:",
+            ["LIDA JSON", "Marketing overview (OpenAI)"],
+            horizontal=True,
+            index=0,
+            key="summary_view_radio"
+        )
+        st.markdown("<div class='boxed'>", unsafe_allow_html=True)
+        if sum_view == "LIDA JSON":
+            st.json(summary)
         else:
-            st.info("Enable **Use ChatGPT for overview (Part 1)** in the sidebar to generate a natural-language summary.")
+            try:
+                mk_sum = marketing_from_summary(summary)
+                st.markdown(mk_sum)
+            except Exception as e:
+                st.error(f"Marketing rewrite failed: {e}")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- Part 2: Visualisation & Evaluation ---
-        st.markdown("---")
-        st.markdown("### Ask for an insight or comparison")
-        left, right = st.columns([0.62, 0.38])
-        with left:
-            prompt = st.text_input("Describe the comparison you want (ignored in testing mode).",
-                                   placeholder="e.g., Compare total sales by region")
-        with right:
-            st.caption("Quick suggestions")
-            recs = recommended_prompts(df)
-            bcols = st.columns(4)
-            chosen = None
-            for i, r in enumerate(recs):
-                if bcols[i].button(r, use_container_width=True, key=f"suggest_{i}"):
-                    chosen = r
+        # Goals
+        st.markdown("### 🎯 LIDA Goals")
+        with st.spinner("Generating analysis goals…"):
+            tcfg_goals = TextGenerationConfig(n=1, temperature=TEXT_TEMP, model=DEFAULT_MODEL, use_cache=True)
+            goals = lida.goals(summary, n=10, textgen_config=tcfg_goals) or []
+            st.session_state["goals"] = goals
 
-        final_prompt = chosen or prompt
-        go = st.button("Generate visualisation", type="primary")
+        if not goals:
+            st.info("No goals returned. Type a custom question:")
+            goal_obj = st.text_input("Your goal/question")
+        else:
+            labels = [label_goal(g) for g in goals]
+            chosen = st.selectbox("Select a goal:", labels, index=0)
+            goal_obj = goals[labels.index(chosen)]
+        st.session_state["goal_obj"] = goal_obj
 
-        if go:
-            if not IMG_PATH.exists():
-                st.error(f"Chart.png not found at: {IMG_PATH}")
-            else:
-                st.session_state["viz_image_path"] = str(IMG_PATH)
-                st.session_state["viz_code"] = (
-                    "# Testing mode: render a static image instead of generating a chart\n"
-                    "from pathlib import Path\n"
-                    "import streamlit as st\n"
-                    "IMG_PATH = Path(__file__).parent / 'Chart.png'\n"
-                    "st.image(str(IMG_PATH), use_container_width=True)\n"
+        # Visualize
+        if st.button("Generate visualization", type="primary"):
+            with st.spinner("Generating visualization with LIDA…"):
+                tcfg_vis = TextGenerationConfig(n=1, temperature=VIZ_TEMP, model=DEFAULT_MODEL, use_cache=True)
+                try:
+                    charts = lida.visualize(summary=summary, goal=goal_obj, library=LIBRARY,
+                                            textgen_config=tcfg_vis, execute_code=True)
+                except TypeError:
+                    charts = lida.visualize(summary=summary, goal=goal_obj, library=LIBRARY,
+                                            textgen_config=tcfg_vis)
+
+            chart = charts[0] if isinstance(charts, list) else charts
+            left, right = st.columns([0.62, 0.38])
+            with left:
+                path = show_chart_artifact(chart, getattr(chart, "code", None), df)
+
+            st.session_state["chart_code"] = getattr(chart, "code", None)
+            st.session_state["chart_png"]  = path
+            st.session_state["eval_ready"] = False
+            st.session_state["eval_df"] = None
+            st.session_state["recommendations"] = None
+
+            # Explanation (stored & shown on right)
+            lida_expl = None
+            try:
+                tcfg_exp = TextGenerationConfig(n=1, temperature=TEXT_TEMP, model=DEFAULT_MODEL, use_cache=True)
+                lida_expl = lida.explain(code=st.session_state["chart_code"], library=LIBRARY, textgen_config=tcfg_exp)
+            except Exception as e:
+                st.error(f"Explain failed: {e}")
+            st.session_state["explanation_obj"] = lida_expl
+            st.session_state["explanation_view"] = "LIDA JSON"
+
+            with right:
+                st.markdown("#### 🧠 Explanation")
+                view = st.radio(
+                    "View",
+                    ["LIDA JSON", "Marketing overview (OpenAI)"],
+                    horizontal=True,
+                    index=0,
+                    key="explanation_view_radio"
                 )
-                st.session_state["viz_expl"] = "This is a static test image (**Chart.png**) shown regardless of the prompt."
-                st.session_state["eval_scores"] = None
-                st.session_state["eval_overall"] = None
-
-        # --- Result & Evaluation ---
-        if st.session_state.get("viz_image_path"):
-            hdr2 = st.columns([0.88, 0.12])
-            with hdr2[0]:
-                st.markdown("### Result")
-            with hdr2[1]:
-                with st.container():
-                    st.markdown('<div class="small-btn">', unsafe_allow_html=True)
-                    if st.button("✖️ Clear", key="clear_part2"):
-                        clear_part2()
-                        st.rerun()
-                    st.markdown('</div>', unsafe_allow_html=True)
-
-            c1r, c2r = st.columns([0.62, 0.38])
-            with c1r:
-                st.image(st.session_state["viz_image_path"], use_container_width=True, caption="(Test) Static chart preview")
-            with c2r:
-                show_code = st.toggle("Show code (toggle for explanation)", value=True)
-                if show_code:
-                    st.subheader("Code used")
-                    st.code(st.session_state["viz_code"], language="python")
+                st.session_state["explanation_view"] = view
+                st.markdown("<div class='boxed'>", unsafe_allow_html=True)
+                if view == "LIDA JSON":
+                    st.json(lida_expl)
                 else:
-                    st.subheader("Explanation")
-                    st.write(st.session_state["viz_expl"])
+                    try:
+                        mk_text = marketing_from_explanation(lida_expl)
+                        st.markdown(mk_text)
+                    except Exception as e:
+                        st.error(f"Marketing overview failed: {e}")
+                st.markdown("</div>", unsafe_allow_html=True)
 
-            st.divider()
-
-            if st.button("Evaluate Visualisation", type="primary"):
-                scores = evaluate_visualisation()
-                st.session_state["eval_scores"] = scores
-                vals = [d["score"] for d in scores.values()]
-                st.session_state["eval_overall"] = round(sum(vals) / len(vals), 2)
-
-            if st.session_state.get("eval_scores"):
-                st.markdown("#### Evaluation Scorecard (for retraining)")
-                c_top = st.columns(3)
-                with c_top[0]:
-                    st.metric("Overall score (1–5)", st.session_state["eval_overall"])
-                with c_top[1]:
-                    st.caption("Scored on 6 parameters")
-                with c_top[2]:
-                    st.caption("Use to supervise & retrain")
-
-                import pandas as _pd
-                eval_table = _pd.DataFrame(
-                    [{"Parameter": k, "Score (1–5)": v["score"], "Rationale": v["why"]}
-                     for k, v in st.session_state["eval_scores"].items()]
+        # Keep chart+explanation visible after reruns
+        if st.session_state.get("chart_code") and st.session_state.get("chart_png") is not None and st.session_state.get("explanation_obj") is not None:
+            left, right = st.columns([0.62, 0.38])
+            with left:
+                st.image(st.session_state["chart_png"], use_container_width=True)
+            with right:
+                st.markdown("#### 🧠 Explanation")
+                view = st.radio(
+                    "View",
+                    ["LIDA JSON", "Marketing overview (OpenAI)"],
+                    horizontal=True,
+                    index=0 if st.session_state.get("explanation_view") == "LIDA JSON" else 1,
+                    key="explanation_view_radio_persist"
                 )
-                st.dataframe(eval_table, use_container_width=True, hide_index=True)
+                st.session_state["explanation_view"] = view
+                st.markdown("<div class='boxed'>", unsafe_allow_html=True)
+                if view == "LIDA JSON":
+                    st.json(st.session_state["explanation_obj"])
+                else:
+                    try:
+                        mk_text = marketing_from_explanation(st.session_state["explanation_obj"])
+                        st.markdown(mk_text)
+                    except Exception as e:
+                        st.error(f"Marketing overview failed: {e}")
+                st.markdown("</div>", unsafe_allow_html=True)
 
-                st.divider()
-
-                st.markdown("#### Rewrite query to improve the visualisation")
-                rcol1, rcol2 = st.columns([0.75, 0.25])
-                with rcol1:
-                    repair_text = st.text_input(
-                        "Suggest a better query (e.g., 'Show median revenue by region, top 10 only').",
-                        placeholder="Rewrite the query based on the evaluation..."
+        # Evaluate
+        if st.session_state.get("chart_code"):
+            st.markdown("---")
+            if st.button("Evaluate visualization", type="primary", key="eval_btn"):
+                try:
+                    tcfg_eval = TextGenerationConfig(n=1, temperature=TEXT_TEMP, model=DEFAULT_MODEL, use_cache=True)
+                    ev = lida.evaluate(code=st.session_state["chart_code"],
+                                       goal=st.session_state["goal_obj"],
+                                       library=LIBRARY,
+                                       textgen_config=tcfg_eval)[0]
+                    df_eval = pd.DataFrame(
+                        [{"Dimension": e["dimension"], "Score (1–10)": e["score"], "Rationale": e["rationale"]}
+                         for e in ev]
                     )
-                with rcol2:
-                    if st.button("Generate improved visualisation"):
-                        if not IMG_PATH.exists():
-                            st.error(f"Chart.png not found at: {IMG_PATH}")
-                        else:
-                            st.session_state["viz_image_path"] = str(IMG_PATH)
-                            st.session_state["viz_code"] = (
-                                "# Testing mode (repair): still render static image\n"
-                                "from pathlib import Path\n"
-                                "import streamlit as st\n"
-                                "IMG_PATH = Path(__file__).parent / 'Chart.png'\n"
-                                "st.image(str(IMG_PATH), use_container_width=True)\n"
+                    st.session_state["eval_df"]   = df_eval
+                    st.session_state["eval_ready"] = True
+                except Exception as e:
+                    st.error(f"Evaluation failed: {e}")
+
+        # Repair & Recommendations
+        if st.session_state.get("eval_ready"):
+            if st.session_state.get("eval_df") is not None:
+                st.dataframe(st.session_state["eval_df"], use_container_width=True)
+
+            st.markdown("### 🔧 Repair query & recommended charts")
+            st.caption("Use the evaluation to refine the goal or try auto-recommended charts.")
+            st.session_state["repair_text"] = st.text_input(
+                "Refine your goal/instructions (e.g., 'Use a bar chart by month and highlight outliers').",
+                value=st.session_state.get("repair_text", ""),
+                key="repair_text_input"
+            )
+
+            c_recs, c_edit = st.columns(2)
+            with c_recs:
+                if st.button("Get visualization recommendations", key="get_recs"):
+                    try:
+                        with st.spinner("Generating recommended charts…"):
+                            tcfg_rec = TextGenerationConfig(
+                                n=REC_COUNT, temperature=REC_TEMP, model=DEFAULT_MODEL, use_cache=True
                             )
-                            st.session_state["viz_expl"] = (
-                                "Improved visualisation requested. In testing mode this still shows the static image."
+                            recs = lida.recommend(
+                                code=st.session_state["chart_code"],
+                                summary=st.session_state["summary"],
+                                n=REC_COUNT,
+                                textgen_config=tcfg_rec,
                             )
-                            st.session_state["eval_scores"] = None
-                            st.session_state["eval_overall"] = None
-                            st.rerun()
+                            st.session_state["recommendations"] = recs or []
+                    except Exception as e:
+                        st.error(f"Recommendation failed: {e}")
+
+            with c_edit:
+                if st.button("Apply repair instruction", key="apply_repair"):
+                    try:
+                        with st.spinner("Editing current chart…"):
+                            tcfg_edit = TextGenerationConfig(n=1, temperature=TEXT_TEMP, model=DEFAULT_MODEL, use_cache=True)
+                            edited = lida.edit(
+                                code=st.session_state["chart_code"],
+                                summary=st.session_state["summary"],
+                                instructions=[st.session_state["repair_text"]] if st.session_state["repair_text"] else [],
+                                library=LIBRARY,
+                                textgen_config=tcfg_edit,
+                            )
+                            edited_chart = edited[0] if isinstance(edited, list) else edited
+                            path = show_chart_artifact(edited_chart, getattr(edited_chart, "code", None), df)
+                            st.session_state["chart_code"] = getattr(edited_chart, "code", None)
+                            st.session_state["chart_png"]  = path
+                            st.session_state["recommendations"] = None
+
+                            # refresh explanation for edited chart
+                            try:
+                                tcfg_exp = TextGenerationConfig(n=1, temperature=TEXT_TEMP, model=DEFAULT_MODEL, use_cache=True)
+                                lida_expl = lida.explain(code=st.session_state["chart_code"], library=LIBRARY, textgen_config=tcfg_exp)
+                                st.session_state["explanation_obj"] = lida_expl
+                                st.session_state["mk_cache"] = None
+                            except Exception as e:
+                                st.error(f"Explain failed: {e}")
+                    except Exception as e:
+                        st.error(f"Edit failed: {e}")
+
+            recs = st.session_state.get("recommendations") or []
+            if recs:
+                st.markdown("#### 📌 Recommended charts")
+                for idx, rec_chart in enumerate(recs, start=1):
+                    st.markdown(f"**Recommendation {idx}**")
+                    preview_path = show_chart_artifact(rec_chart, getattr(rec_chart, "code", None), df)
+                    c1, c2 = st.columns([0.25, 0.75])
+                    with c1:
+                        if st.button(f"Use recommendation {idx}", key=f"use_rec_{idx}"):
+                            st.session_state["chart_code"] = getattr(rec_chart, "code", None)
+                            st.session_state["chart_png"]  = preview_path
+                            st.session_state["recommendations"] = None
+                            # refresh explanation
+                            try:
+                                tcfg_exp = TextGenerationConfig(n=1, temperature=TEXT_TEMP, model=DEFAULT_MODEL, use_cache=True)
+                                lida_expl = lida.explain(code=st.session_state["chart_code"], library=LIBRARY, textgen_config=tcfg_exp)
+                                st.session_state["explanation_obj"] = lida_expl
+                                st.session_state["mk_cache"] = None
+                            except Exception as e:
+                                st.error(f"Explain failed: {e}")
+                            st.success(f"Applied recommendation {idx}.")
+                    with c2:
+                        if getattr(rec_chart, "code", None):
+                            with st.expander("Show code"):
+                                st.code(getattr(rec_chart, "code"), language="python")
 
     except Exception as e:
-        st.error(f"❌ Could not read the file: {e}")
+        st.error(f"❌ Error: {e}")
