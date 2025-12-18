@@ -38,7 +38,7 @@ This process highlighted a key lesson from the course: AI can accelerate develop
 
 The central AI feature in Helios AI is **guided data exploration** powered by LIDA. Rather than attempting to build a fully autonomous “insight engine,” I intentionally scoped the product to support users at specific decision points: summarizing a dataset, proposing analytical goals, generating visualizations, and explaining results.
 
-I chose this feature set because it directly addresses a real pain point: many users do not struggle with *access* to data, but with knowing what questions to ask and how to interpret outputs. LIDA was a good fit because it structures AI usage around explicit steps—summarize, set goals, visualize, explain—rather than producing opaque, end-to-end answers.
+I chose this feature set because it directly addresses a real pain point: many users do not struggle with *access* to data, but with knowing what questions to ask and how to interpret outputs. LIDA was a good fit because it structures AI usage around explicit steps, summarize, set goals, visualize, explain—rather than producing opaque, end-to-end answers.
 
 Several potential AI features were intentionally excluded or scaled back. For example:
 
@@ -58,7 +58,7 @@ Building with generative AI raised several ethical and practical concerns that I
 
 **Bias and fairness** were also important. AI-generated summaries and explanations can reflect biases present in training data or default analytical assumptions. To mitigate this, I exposed raw LIDA outputs alongside rewritten, natural-language explanations. This transparency allows users to see the underlying reasoning rather than blindly trusting a polished narrative.
 
-**Over-reliance on AI** was a key risk I explicitly designed against. The product surfaces generated code, explanations, and evaluations, making it clear that outputs are suggestions—not facts. Users are encouraged to iterate, edit, or reject AI outputs rather than accept them as authoritative.
+**Over-reliance on AI** was a key risk I explicitly designed against. The product surfaces generated code, explanations, and evaluations, making it clear that outputs are suggestions, not facts. Users are encouraged to iterate, edit, or reject AI outputs rather than accept them as authoritative.
 
 Finally, **academic integrity** was an important consideration in my own use of AI during development. While I used ChatGPT extensively, all architectural decisions, debugging work, and final writing were my own. AI assisted with exploration and iteration, but I remained accountable for understanding and justifying every part of the system. This aligns with the course’s emphasis on honest and transparent AI use.
 
@@ -66,7 +66,7 @@ Finally, **academic integrity** was an important consideration in my own use of 
 
 ## What I Learned About Building with Generative AI
 
-The biggest surprise in this project was how often AI was *almost* correct but still wrong in subtle ways. Many issues—such as environment configuration, API authentication, or chart rendering, required careful human inspection that AI could not reliably perform on its own.
+The biggest surprise in this project was how often AI was *almost* correct but still wrong in subtle ways. Many issues, such as environment configuration, API authentication, or chart rendering, required careful human inspection that AI could not reliably perform on its own.
 
 One major lesson I would teach another founder is this: **AI works best when constrained by clear boundaries and paired with strong human judgment**. The most successful moments in this project came when AI was used for narrow, well-defined tasks rather than open-ended problem solving.
 
