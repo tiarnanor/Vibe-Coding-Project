@@ -6,7 +6,7 @@
 
 This memo reflects on the design, implementation, and ethical considerations behind **Helios AI**, a Streamlit-based prototype that uses generative AI to support data exploration and visualization. The purpose of this document is not only to describe what was built, but to explain *why* specific AI features were chosen, *how* AI was actually used during development, and *what trade-offs and risks* were considered along the way.
 
-Throughout this project, I treated AI not as a replacement for human reasoning, but as a collaborator—both in the development process and in the final product. Building Helios AI reinforced many of the course’s core themes around responsible AI use, human oversight, and the importance of transparency when deploying generative systems.
+Throughout this project, I treated AI not as a replacement for human reasoning, but as a collaborator, both in the development process and in the final product. Building Helios AI reinforced many of the course’s core themes around responsible AI use, human oversight, and the importance of transparency when deploying generative systems.
 
 ---
 
