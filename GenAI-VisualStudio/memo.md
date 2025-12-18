@@ -1,47 +1,81 @@
-#### Implementation & Ethics Memo
+# Implementation & Ethics Memo
 
-This memo outlines the design decisions, development process, and ethical considerations behind my LIDA-based Streamlit project. Alongside the Product Requirements Document, it explains how generative AI was used during development, why the final AI functionality was scoped the way it was, and what I learned about building interactive systems with large language models.
+**Project: Helios AI (LIDA-based Streamlit Application)**
 
+## Introduction
 
+This memo reflects on the design, implementation, and ethical considerations behind **Helios AI**, a Streamlit-based prototype that uses generative AI to support data exploration and visualization. The purpose of this document is not only to describe what was built, but to explain *why* specific AI features were chosen, *how* AI was actually used during development, and *what trade-offs and risks* were considered along the way.
 
-**How I Used AI While Building the Project**
+Throughout this project, I treated AI not as a replacement for human reasoning, but as a collaborator—both in the development process and in the final product. Building Helios AI reinforced many of the course’s core themes around responsible AI use, human oversight, and the importance of transparency when deploying generative systems.
 
-The project was developed primarily in Visual Studio Code, using Python and Streamlit as the application framework. The core AI functionality was implemented by integrating the open-source LIDA library directly from its GitHub repository. LIDA provided the structured pipeline for dataset summarization, goal generation, visualization, explanation, evaluation, and recommendation.
+---
 
-In addition to these tools, I used ChatGPT extensively as a development aid throughout the build process. Rather than writing the application autonomously, ChatGPT functioned as a support tool for reasoning through implementation challenges, understanding unfamiliar APIs, debugging errors, and refining design decisions. Typical tasks where AI assistance was most useful included generating initial code scaffolds, interpreting error messages, explaining how LIDA components interact, and suggesting ways to structure Streamlit session state.
+## How I Actually Used AI While Building
 
-Despite this assistance, human judgment played a central role in the project. AI-generated code often required modification to work correctly in my environment, particularly when combining LIDA, Streamlit, LiteLLM, and OpenAI-compatible APIs. I frequently rewrote or simplified suggestions to better align with the project requirements and to maintain clarity and control over the system’s behavior. All final architectural decisions, integrations, and written outputs reflect my own understanding and intent.
+AI played a significant role in the development of Helios AI, but in a very practical and iterative way rather than as a fully autonomous builder. I primarily used **ChatGPT** alongside **Visual Studio Code** as a “vibe coding” partner. This meant using AI to accelerate certain tasks while maintaining full responsibility for design decisions, debugging, and final implementation.
 
+The main areas where AI assisted during development included:
 
+* generating initial code scaffolding for Streamlit components,
+* helping debug Python errors and dependency issues,
+* explaining unfamiliar libraries (particularly LIDA and LiteLLM),
+* suggesting UI patterns or ways to structure user flows,
+* and rewriting or refining explanatory text.
 
-**Why the AI Feature Is Designed This Way**
+However, AI-generated code was almost never used verbatim. In practice, most outputs required substantial human editing—especially when integrating multiple systems such as Streamlit, OpenAI APIs, and LIDA. Debugging environment issues, API authentication failures, visualization execution errors, and session-state logic required careful human reasoning and trial-and-error that AI alone could not resolve.
 
-The primary AI feature of the product is an interactive data exploration assistant that helps users move from raw data to insights through visualizations. I chose this feature because it aligns closely with LIDA’s strengths and addresses a common real-world problem: enabling non-technical users to explore and understand datasets without writing code.
+Human judgment was most important when:
 
-Rather than attempting to create a fully autonomous “AI analyst,” I intentionally designed the system to keep users in control at every stage. Users upload the data, select or refine analytical goals, trigger visualizations, and choose whether to apply AI-generated recommendations or edits. This human-in-the-loop design reflects both practical constraints and ethical considerations, ensuring that AI augments user decision-making rather than replacing it.
+* deciding *which* AI features were actually useful to users,
+* diagnosing silent failures where AI suggestions were technically plausible but practically incorrect,
+* and ensuring that outputs made sense in a real analytical context.
 
-Some potential features were deliberately scoped out, such as persistent user accounts, automated actions without confirmation, or long-term memory across sessions. While technically possible, these features would introduce additional complexity around privacy, reliability, and governance that were not necessary for demonstrating the core value of the system within the scope of this assignment.
+This process highlighted a key lesson from the course: AI can accelerate development, but it does not replace deep understanding of the system being built.
 
+---
 
+## Why the AI Feature in the Product Looks the Way It Does
 
-**Risks, Trade-offs, and Ethical Considerations**
+The central AI feature in Helios AI is **guided data exploration** powered by LIDA. Rather than attempting to build a fully autonomous “insight engine,” I intentionally scoped the product to support users at specific decision points: summarizing a dataset, proposing analytical goals, generating visualizations, and explaining results.
 
-Data privacy was a key consideration throughout development. Users may upload datasets that contain sensitive or proprietary information, so the system avoids persistent storage and processes data only within the active session. API keys are handled through environment variables and Streamlit’s secrets management rather than being hardcoded into the repository, reducing the risk of accidental exposure.
+I chose this feature set because it directly addresses a real pain point: many users do not struggle with *access* to data, but with knowing what questions to ask and how to interpret outputs. LIDA was a good fit because it structures AI usage around explicit steps—summarize, set goals, visualize, explain—rather than producing opaque, end-to-end answers.
 
-Bias and interpretability were also important concerns. Because LIDA relies on large language models to generate summaries, goals, and explanations, there is a risk that outputs may reflect biased assumptions or oversimplified narratives. To mitigate this, the system presents AI outputs as suggestions rather than facts and allows users to inspect generated code and evaluation rationales. The inclusion of an evaluation and repair stage explicitly encourages users to question and refine AI-generated results.
+Several potential AI features were intentionally excluded or scaled back. For example:
 
-I also considered the risk of over-reliance on AI. Automatically generated charts and explanations can appear authoritative even when they are imperfect. By requiring explicit user actions to generate, evaluate, and apply changes, the system reinforces the idea that AI is a tool for assistance rather than a final decision-maker.
+* I did not include automated “business recommendations” based on charts, because this would risk over-interpretation.
+* I avoided auto-running model decisions without user confirmation.
+* I limited generation to user-triggered actions rather than continuous background inference.
 
-From an academic integrity perspective, I used AI tools transparently and responsibly. ChatGPT was used to support learning, debugging, and ideation, but all final work reflects my own understanding and effort. I did not submit AI-generated content without review or comprehension, and I ensured that the project demonstrates genuine engagement with the technical and conceptual material.
+These choices were made to keep the AI aligned with the product’s core value proposition: **supporting, not replacing, analytical thinking**. In its current state, Helios AI connects strongly to that goal, even if some features remain partially implemented or experimental.
 
+---
 
+## Risks, Trade-offs, and Integrity Considerations
 
-**What I Learned About Building with Generative AI**
+Building with generative AI raised several ethical and practical concerns that I actively considered.
 
-One of the biggest lessons from this project was that integrating AI into a real application requires far more design and oversight than initial prototypes suggest. While generative models are powerful, they are most effective when constrained by clear interfaces, explicit user control, and robust error handling.
+**Privacy and data use** were a major consideration. Uploaded datasets may contain sensitive information, so the prototype is designed as a local or controlled deployment rather than a public data store. No datasets are persisted beyond a session, and AI calls are limited to schema-level summaries and code-based visualization prompts rather than raw data extraction wherever possible.
 
-The most challenging aspect of the project was debugging issues that spanned multiple systems, such as environment configuration, API authentication, and deployment on Streamlit Cloud. These challenges highlighted the importance of understanding the full development stack rather than relying solely on AI-generated fixes.
+**Bias and fairness** were also important. AI-generated summaries and explanations can reflect biases present in training data or default analytical assumptions. To mitigate this, I exposed raw LIDA outputs alongside rewritten, natural-language explanations. This transparency allows users to see the underlying reasoning rather than blindly trusting a polished narrative.
 
-If I were advising another student or founder using generative AI tools, I would emphasize treating AI as a collaborator rather than an authority. Clear prompts, careful validation, and a willingness to override or reject AI suggestions are essential. Used well, AI can significantly accelerate development, but it does not replace the need for responsibility, judgment, or ethical consideration.
+**Over-reliance on AI** was a key risk I explicitly designed against. The product surfaces generated code, explanations, and evaluations, making it clear that outputs are suggestions—not facts. Users are encouraged to iterate, edit, or reject AI outputs rather than accept them as authoritative.
+
+Finally, **academic integrity** was an important consideration in my own use of AI during development. While I used ChatGPT extensively, all architectural decisions, debugging work, and final writing were my own. AI assisted with exploration and iteration, but I remained accountable for understanding and justifying every part of the system. This aligns with the course’s emphasis on honest and transparent AI use.
+
+---
+
+## What I Learned About Building with Generative AI
+
+The biggest surprise in this project was how often AI was *almost* correct but still wrong in subtle ways. Many issues—such as environment configuration, API authentication, or chart rendering, required careful human inspection that AI could not reliably perform on its own.
+
+One major lesson I would teach another founder is this: **AI works best when constrained by clear boundaries and paired with strong human judgment**. The most successful moments in this project came when AI was used for narrow, well-defined tasks rather than open-ended problem solving.
+
+This project also reshaped how I think about AI in future work. Rather than viewing generative AI as a shortcut, I now see it as a design material. Something that must be shaped, limited, and contextualized to create trustworthy products. As I move into future capstone or professional projects, I will be more intentional about when AI should speak, when it should stay silent, and how users are informed about its role.
+
+---
+
+## Conclusion
+
+Helios AI is not a perfect or complete product, but it is an honest exploration of what it means to build with generative AI responsibly. The project reflects deliberate design choices, thoughtful constraints, and meaningful engagement with the ethical questions raised throughout the course. Most importantly, it reinforced that successful AI products are not defined by how much AI they use, but by how well they integrate human judgment, transparency, and trust.
 
 Overall, this project has influenced how I think about AI in future academic work and potential ventures. Rather than viewing AI as a feature to be added, I now see it as an interaction layer that must be carefully designed to support human understanding, transparency, and trust.
